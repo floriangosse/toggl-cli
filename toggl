@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+
+COMMAND=${1:-}
+
+print_usage () {
+    echo "Usage: toggl [start|stop]"
+    echo
+    echo "    start [description]  Starts a new time entry"
+    echo "    stop                 Stops current running time entry"
+    echo
+    echo
+    echo "Environment variables:"
+    echo
+    echo "    TOGGL_TOKEN          Contains the Toggl authentication token which should be"
+    echo "                         used to communicate with the Toggl API."
+}
+
+json_escape () {
+    printf '%s' "$1" | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+}
+
+http_request () {
+    local method=$1
+    local path=$2
+    local data=${3:-}
+
+    if [[ -z "$data" ]]; then
+        curl --silent --fail --location \
+            --user "${TOGGL_TOKEN}:api_token" \
+            --request ${method} "https://www.toggl.com/api/v8${path}"
+    else
+        curl --silent --fail --location \
+            --user "${TOGGL_TOKEN}:api_token" \
+            --header 'Content-Type: application/json' \
+            --data "${data}" \
+            --request ${method} "https://www.toggl.com/api/v8${path}"
+    fi
+
+    return $?
+}
+
+
+# Check if all necessary commands are installed
+if ! hash curl > /dev/null 2>&1; then
+    echo "Cloudn't find command curl."
+    exit 1
+fi
+
+if ! hash jq > /dev/null 2>&1; then
+    echo "Cloudn't find command jq."
+    exit 1
+fi
+
+
+# Check if all environment variables are set
+if [[ -z "${TOGGL_TOKEN:-}" ]]; then
+    echo "Missing environment variable \$TOGGL_TOKEN." >&2
+    print_usage >&2
+    exit 2
+fi
+
+
+# Handle commands
+if [[ "$COMMAND" == "start" ]]; then
+
+    DESCRIPTION=${2:-}
+
+    if [[ -z "$DESCRIPTION" ]]; then
+        echo "Missing description." >&2
+        print_usage >&2
+        exit 4
+    fi
+
+    http_request \
+        'POST' '/time_entries/start' \
+        "{ \"time_entry\": { \"description\": $(json_escape "$DESCRIPTION"), \"created_with\": \"toggl-cli\" } }" > /dev/null
+
+    if [[ "$?" != "0" ]]; then
+        echo "FAILED"
+        exit 5
+    fi
+
+    echo "OK"
+
+elif [[ "$COMMAND" == "stop" ]]; then
+
+    CURRENT_ID=$(http_request 'GET' '/time_entries/current' | jq '.data.id');
+
+    if [[ -z "$CURRENT_ID" ]] || [[ "$CURRENT_ID" == "null" ]]; then
+        echo "OK"
+        exit 0
+    fi
+
+    http_request 'PUT' "/time_entries/${CURRENT_ID}/stop" > /dev/null
+
+    if [[ "$?" != "0" ]]; then
+        echo "FAILED"
+        exit 5
+    fi
+
+    echo "OK"
+
+else
+    if ! [[ -z "$COMMAND" ]]; then
+        echo "Command $COMMAND doesn't exist." >&2
+    fi
+
+    print_usage >&2
+    exit 3
+fi
