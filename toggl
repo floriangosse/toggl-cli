@@ -68,12 +68,6 @@ if [[ "$COMMAND" == "start" ]]; then
 
     DESCRIPTION=${2:-}
 
-    if [[ -z "$DESCRIPTION" ]]; then
-        echo "Missing description." >&2
-        print_usage >&2
-        exit 4
-    fi
-
     http_request \
         'POST' '/time_entries/start' \
         "{ \"time_entry\": { \"description\": $(json_escape "$DESCRIPTION"), \"created_with\": \"toggl-cli\" } }" > /dev/null
